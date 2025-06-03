@@ -37,7 +37,6 @@ export default function Reports() {
   });
 
   const { data: salesReport, isLoading: reportLoading } = useQuery<SalesReport>({
-    queryKey: ['/api/reports/sales', dateRange.start, dateRange.end],
     queryKey: ['/api/reports/sales', { 
       startDate: dateRange.start, 
       endDate: dateRange.end 

@@ -437,7 +437,10 @@ export class DatabaseStorage implements IStorage {
       const saleItem = new SaleItemModel({
         _id: nanoid(),
         saleId,
-        ...item,
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        totalPrice: item.totalPrice,
       });
       const savedItem = await saleItem.save();
       

@@ -38,7 +38,6 @@ export default function Inventory() {
   const [editingProduct, setEditingProduct] = useState<ProductWithCategory | null>(null);
 
   const { data: products, isLoading: productsLoading } = useQuery<ProductWithCategory[]>({
-    queryKey: ['/api/products', { search: searchQuery }],
     queryKey: searchQuery ? ['/api/products', { search: searchQuery }] : ['/api/products'],
   });
 
