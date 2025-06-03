@@ -89,7 +89,7 @@ export default function Inventory() {
         comparison = a.name.localeCompare(b.name);
         break;
       case 'price':
-        comparison = parseFloat(a.price) - parseFloat(b.price);
+        comparison = a.price - b.price;
         break;
       case 'stock':
         comparison = a.stock - b.stock;
