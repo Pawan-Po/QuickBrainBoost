@@ -1,191 +1,278 @@
-import {
-  pgTable,
-  text,
-  varchar,
-  timestamp,
-  jsonb,
-  index,
-  serial,
-  decimal,
-  integer,
-  boolean,
-} from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
-import { relations } from "drizzle-orm";
+import mongoose, { Schema, Document } from 'mongoose';
+import { z } from 'zod';
 
-// Session storage table for Replit Auth
-export const sessions = pgTable(
-  "sessions",
-  {
-    sid: varchar("sid").primaryKey(),
-    sess: jsonb("sess").notNull(),
-    expire: timestamp("expire").notNull(),
-  },
-  (table) => [index("IDX_session_expire").on(table.expire)],
-);
+// User interface and model
+export interface IUser extends Document {
+  _id: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  profileImageUrl?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
 
-// User storage table for Replit Auth
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().notNull(),
-  email: varchar("email").unique(),
-  firstName: varchar("first_name"),
-  lastName: varchar("last_name"),
-  profileImageUrl: varchar("profile_image_url"),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
+const userSchema = new Schema<IUser>({
+  _id: { type: String, required: true },
+  email: { type: String, unique: true, sparse: true },
+  firstName: String,
+  lastName: String,
+  profileImageUrl: String,
+}, { timestamps: true });
+
+export const UserModel = mongoose.model<IUser>('User', userSchema);
+
+// Category interface and model
+export interface ICategory extends Document {
+  _id: string;
+  name: string;
+  color: string;
+  userId: string;
+  createdAt: Date;
+}
+
+const categorySchema = new Schema<ICategory>({
+  name: { type: String, required: true, maxlength: 100 },
+  color: { type: String, default: "#1976D2", maxlength: 7 },
+  userId: { type: String, required: true, ref: 'User' },
+}, { timestamps: true });
+
+export const CategoryModel = mongoose.model<ICategory>('Category', categorySchema);
+
+// Product interface and model
+export interface IProduct extends Document {
+  _id: string;
+  name: string;
+  barcode?: string;
+  price: number;
+  cost?: number;
+  stock: number;
+  minStock: number;
+  categoryId?: string;
+  imageUrl?: string;
+  description?: string;
+  isActive: boolean;
+  userId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+const productSchema = new Schema<IProduct>({
+  name: { type: String, required: true, maxlength: 200 },
+  barcode: { type: String, maxlength: 50 },
+  price: { type: Number, required: true },
+  cost: Number,
+  stock: { type: Number, default: 0, required: true },
+  minStock: { type: Number, default: 5, required: true },
+  categoryId: { type: String, ref: 'Category' },
+  imageUrl: String,
+  description: String,
+  isActive: { type: Boolean, default: true, required: true },
+  userId: { type: String, required: true, ref: 'User' },
+}, { timestamps: true });
+
+export const ProductModel = mongoose.model<IProduct>('Product', productSchema);
+
+// Sale interface and model
+export interface ISale extends Document {
+  _id: string;
+  total: number;
+  subtotal: number;
+  tax: number;
+  discount: number;
+  paymentMethod: string;
+  customerName?: string;
+  receiptNumber: string;
+  userId: string;
+  createdAt: Date;
+}
+
+const saleSchema = new Schema<ISale>({
+  total: { type: Number, required: true },
+  subtotal: { type: Number, required: true },
+  tax: { type: Number, default: 0 },
+  discount: { type: Number, default: 0 },
+  paymentMethod: { type: String, default: "cash", maxlength: 50 },
+  customerName: { type: String, maxlength: 100 },
+  receiptNumber: { type: String, required: true, maxlength: 50 },
+  userId: { type: String, required: true, ref: 'User' },
+}, { timestamps: true });
+
+export const SaleModel = mongoose.model<ISale>('Sale', saleSchema);
+
+// Sale Item interface and model
+export interface ISaleItem extends Document {
+  _id: string;
+  saleId: string;
+  productId: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+}
+
+const saleItemSchema = new Schema<ISaleItem>({
+  saleId: { type: String, required: true, ref: 'Sale' },
+  productId: { type: String, required: true, ref: 'Product' },
+  quantity: { type: Number, required: true },
+  unitPrice: { type: Number, required: true },
+  totalPrice: { type: Number, required: true },
 });
 
-export const categories = pgTable("categories", {
-  id: serial("id").primaryKey(),
-  name: varchar("name", { length: 100 }).notNull(),
-  color: varchar("color", { length: 7 }).default("#1976D2"),
-  createdAt: timestamp("created_at").defaultNow(),
+export const SaleItemModel = mongoose.model<ISaleItem>('SaleItem', saleItemSchema);
+
+// Stock Movement interface and model
+export interface IStockMovement extends Document {
+  _id: string;
+  productId: string;
+  type: string;
+  quantity: number;
+  reason?: string;
+  referenceId?: string;
+  userId: string;
+  createdAt: Date;
+}
+
+const stockMovementSchema = new Schema<IStockMovement>({
+  productId: { type: String, required: true, ref: 'Product' },
+  type: { type: String, required: true, maxlength: 20 }, // 'sale', 'adjustment', 'restock'
+  quantity: { type: Number, required: true }, // positive for additions, negative for reductions
+  reason: { type: String, maxlength: 100 },
+  referenceId: String, // sale_id if type is 'sale'
+  userId: { type: String, required: true, ref: 'User' },
+}, { timestamps: true });
+
+export const StockMovementModel = mongoose.model<IStockMovement>('StockMovement', stockMovementSchema);
+
+// Zod schemas for validation
+export const insertCategorySchema = z.object({
+  name: z.string().max(100),
+  color: z.string().max(7).optional(),
+  userId: z.string(),
 });
 
-export const products = pgTable("products", {
-  id: serial("id").primaryKey(),
-  name: varchar("name", { length: 200 }).notNull(),
-  barcode: varchar("barcode", { length: 50 }),
-  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
-  cost: decimal("cost", { precision: 10, scale: 2 }),
-  stock: integer("stock").default(0).notNull(),
-  minStock: integer("min_stock").default(5).notNull(),
-  categoryId: integer("category_id").references(() => categories.id),
-  imageUrl: text("image_url"),
-  description: text("description"),
-  isActive: boolean("is_active").default(true).notNull(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow(),
+export const insertProductSchema = z.object({
+  name: z.string().max(200),
+  barcode: z.string().max(50).optional(),
+  price: z.number().positive(),
+  cost: z.number().positive().optional(),
+  stock: z.number().int().min(0).optional(),
+  minStock: z.number().int().min(0).optional(),
+  categoryId: z.string().optional(),
+  imageUrl: z.string().optional(),
+  description: z.string().optional(),
+  isActive: z.boolean().optional(),
+  userId: z.string(),
 });
 
-export const sales = pgTable("sales", {
-  id: serial("id").primaryKey(),
-  total: decimal("total", { precision: 10, scale: 2 }).notNull(),
-  subtotal: decimal("subtotal", { precision: 10, scale: 2 }).notNull(),
-  tax: decimal("tax", { precision: 10, scale: 2 }).default("0.00"),
-  discount: decimal("discount", { precision: 10, scale: 2 }).default("0.00"),
-  paymentMethod: varchar("payment_method", { length: 50 }).default("cash"),
-  customerName: varchar("customer_name", { length: 100 }),
-  receiptNumber: varchar("receipt_number", { length: 50 }).notNull(),
-  userId: varchar("user_id").references(() => users.id).notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
+export const insertSaleSchema = z.object({
+  total: z.number().positive(),
+  subtotal: z.number().positive(),
+  tax: z.number().min(0).optional(),
+  discount: z.number().min(0).optional(),
+  paymentMethod: z.string().max(50).optional(),
+  customerName: z.string().max(100).optional(),
+  receiptNumber: z.string().max(50),
+  userId: z.string(),
 });
 
-export const saleItems = pgTable("sale_items", {
-  id: serial("id").primaryKey(),
-  saleId: integer("sale_id").references(() => sales.id).notNull(),
-  productId: integer("product_id").references(() => products.id).notNull(),
-  quantity: integer("quantity").notNull(),
-  unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
-  totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+export const insertSaleItemSchema = z.object({
+  saleId: z.string(),
+  productId: z.string(),
+  quantity: z.number().int().positive(),
+  unitPrice: z.number().positive(),
+  totalPrice: z.number().positive(),
 });
 
-export const stockMovements = pgTable("stock_movements", {
-  id: serial("id").primaryKey(),
-  productId: integer("product_id").references(() => products.id).notNull(),
-  type: varchar("type", { length: 20 }).notNull(), // 'sale', 'adjustment', 'restock'
-  quantity: integer("quantity").notNull(), // positive for additions, negative for reductions
-  reason: varchar("reason", { length: 100 }),
-  referenceId: integer("reference_id"), // sale_id if type is 'sale'
-  userId: varchar("user_id").references(() => users.id).notNull(),
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-// Relations
-export const usersRelations = relations(users, ({ many }) => ({
-  products: many(products),
-  sales: many(sales),
-  stockMovements: many(stockMovements),
-}));
-
-export const categoriesRelations = relations(categories, ({ many }) => ({
-  products: many(products),
-}));
-
-export const productsRelations = relations(products, ({ one, many }) => ({
-  category: one(categories, {
-    fields: [products.categoryId],
-    references: [categories.id],
-  }),
-  user: one(users, {
-    fields: [products.userId],
-    references: [users.id],
-  }),
-  saleItems: many(saleItems),
-  stockMovements: many(stockMovements),
-}));
-
-export const salesRelations = relations(sales, ({ one, many }) => ({
-  user: one(users, {
-    fields: [sales.userId],
-    references: [users.id],
-  }),
-  items: many(saleItems),
-}));
-
-export const saleItemsRelations = relations(saleItems, ({ one }) => ({
-  sale: one(sales, {
-    fields: [saleItems.saleId],
-    references: [sales.id],
-  }),
-  product: one(products, {
-    fields: [saleItems.productId],
-    references: [products.id],
-  }),
-}));
-
-export const stockMovementsRelations = relations(stockMovements, ({ one }) => ({
-  product: one(products, {
-    fields: [stockMovements.productId],
-    references: [products.id],
-  }),
-  user: one(users, {
-    fields: [stockMovements.userId],
-    references: [users.id],
-  }),
-}));
-
-// Insert schemas
-export const insertCategorySchema = createInsertSchema(categories).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertProductSchema = createInsertSchema(products).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
-export const insertSaleSchema = createInsertSchema(sales).omit({
-  id: true,
-  createdAt: true,
-});
-
-export const insertSaleItemSchema = createInsertSchema(saleItems).omit({
-  id: true,
-});
-
-export const insertStockMovementSchema = createInsertSchema(stockMovements).omit({
-  id: true,
-  createdAt: true,
+export const insertStockMovementSchema = z.object({
+  productId: z.string(),
+  type: z.string().max(20),
+  quantity: z.number().int(),
+  reason: z.string().max(100).optional(),
+  referenceId: z.string().optional(),
+  userId: z.string(),
 });
 
 // Types
-export type UpsertUser = typeof users.$inferInsert;
-export type User = typeof users.$inferSelect;
+export type UpsertUser = {
+  id: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  profileImageUrl?: string;
+};
+
+export type User = {
+  id: string;
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  profileImageUrl?: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type InsertCategory = z.infer<typeof insertCategorySchema>;
-export type Category = typeof categories.$inferSelect;
+export type Category = {
+  id: string;
+  name: string;
+  color: string;
+  userId: string;
+  createdAt: Date;
+};
+
 export type InsertProduct = z.infer<typeof insertProductSchema>;
-export type Product = typeof products.$inferSelect;
+export type Product = {
+  id: string;
+  name: string;
+  barcode?: string;
+  price: number;
+  cost?: number;
+  stock: number;
+  minStock: number;
+  categoryId?: string;
+  imageUrl?: string;
+  description?: string;
+  isActive: boolean;
+  userId: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
 export type InsertSale = z.infer<typeof insertSaleSchema>;
-export type Sale = typeof sales.$inferSelect;
+export type Sale = {
+  id: string;
+  total: number;
+  subtotal: number;
+  tax: number;
+  discount: number;
+  paymentMethod: string;
+  customerName?: string;
+  receiptNumber: string;
+  userId: string;
+  createdAt: Date;
+};
+
 export type InsertSaleItem = z.infer<typeof insertSaleItemSchema>;
-export type SaleItem = typeof saleItems.$inferSelect;
+export type SaleItem = {
+  id: string;
+  saleId: string;
+  productId: string;
+  quantity: number;
+  unitPrice: number;
+  totalPrice: number;
+};
+
 export type InsertStockMovement = z.infer<typeof insertStockMovementSchema>;
-export type StockMovement = typeof stockMovements.$inferSelect;
+export type StockMovement = {
+  id: string;
+  productId: string;
+  type: string;
+  quantity: number;
+  reason?: string;
+  referenceId?: string;
+  userId: string;
+  createdAt: Date;
+};
 
 // Extended types for relations
 export type ProductWithCategory = Product & {

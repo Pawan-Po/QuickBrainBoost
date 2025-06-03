@@ -1,10 +1,10 @@
 import {
-  users,
-  categories,
-  products,
-  sales,
-  saleItems,
-  stockMovements,
+  UserModel,
+  CategoryModel,
+  ProductModel,
+  SaleModel,
+  SaleItemModel,
+  StockMovementModel,
   type User,
   type UpsertUser,
   type Category,
@@ -14,15 +14,15 @@ import {
   type ProductWithCategory,
   type Sale,
   type InsertSale,
-  type SaleWithItems,
-  type InsertSaleItem,
   type SaleItem,
-  type InsertStockMovement,
+  type InsertSaleItem,
+  type SaleWithItems,
   type StockMovement,
+  type InsertStockMovement,
 } from "@shared/schema";
-import { db } from "./db";
-import { eq, desc, asc, and, sum, count, sql, gte, lte } from "drizzle-orm";
+import { nanoid } from "nanoid";
 
+// Interface for storage operations
 export interface IStorage {
   // User operations (mandatory for Replit Auth)
   getUser(id: string): Promise<User | undefined>;
@@ -31,23 +31,23 @@ export interface IStorage {
   // Category operations
   getCategories(userId: string): Promise<Category[]>;
   createCategory(category: InsertCategory): Promise<Category>;
-  updateCategory(id: number, category: Partial<InsertCategory>): Promise<Category>;
-  deleteCategory(id: number): Promise<void>;
+  updateCategory(id: string, category: Partial<InsertCategory>): Promise<Category>;
+  deleteCategory(id: string): Promise<void>;
 
   // Product operations
   getProducts(userId: string): Promise<ProductWithCategory[]>;
-  getProduct(id: number, userId: string): Promise<ProductWithCategory | undefined>;
+  getProduct(id: string, userId: string): Promise<ProductWithCategory | undefined>;
   getProductByBarcode(barcode: string, userId: string): Promise<ProductWithCategory | undefined>;
   createProduct(product: InsertProduct): Promise<Product>;
-  updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product>;
-  deleteProduct(id: number): Promise<void>;
+  updateProduct(id: string, product: Partial<InsertProduct>): Promise<Product>;
+  deleteProduct(id: string): Promise<void>;
   getLowStockProducts(userId: string): Promise<ProductWithCategory[]>;
   searchProducts(query: string, userId: string): Promise<ProductWithCategory[]>;
 
   // Sales operations
   createSale(sale: InsertSale, items: InsertSaleItem[]): Promise<SaleWithItems>;
   getSales(userId: string, limit?: number): Promise<SaleWithItems[]>;
-  getSale(id: number, userId: string): Promise<SaleWithItems | undefined>;
+  getSale(id: string, userId: string): Promise<SaleWithItems | undefined>;
   getDailySales(userId: string, date: Date): Promise<{ total: string; count: number }>;
   getSalesReport(userId: string, startDate: Date, endDate: Date): Promise<{
     totalSales: string;
@@ -56,8 +56,8 @@ export interface IStorage {
   }>;
 
   // Stock operations
-  updateStock(productId: number, quantity: number, type: string, reason?: string, userId?: string): Promise<void>;
-  getStockMovements(productId: number): Promise<StockMovement[]>;
+  updateStock(productId: string, quantity: number, type: string, reason?: string, userId?: string): Promise<void>;
+  getStockMovements(productId: string): Promise<StockMovement[]>;
 
   // Dashboard operations
   getDashboardStats(userId: string): Promise<{
@@ -78,311 +78,541 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   // User operations (mandatory for Replit Auth)
   async getUser(id: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+    const user = await UserModel.findById(id);
+    if (!user) return undefined;
+    
+    return {
+      id: user._id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      profileImageUrl: user.profileImageUrl,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {
-    const [user] = await db
-      .insert(users)
-      .values(userData)
-      .onConflictDoUpdate({
-        target: users.id,
-        set: {
-          ...userData,
-          updatedAt: new Date(),
-        },
-      })
-      .returning();
-    return user;
+    const user = await UserModel.findByIdAndUpdate(
+      userData.id,
+      {
+        email: userData.email,
+        firstName: userData.firstName,
+        lastName: userData.lastName,
+        profileImageUrl: userData.profileImageUrl,
+      },
+      { upsert: true, new: true }
+    );
+
+    return {
+      id: user._id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      profileImageUrl: user.profileImageUrl,
+      createdAt: user.createdAt,
+      updatedAt: user.updatedAt,
+    };
   }
 
   // Category operations
   async getCategories(userId: string): Promise<Category[]> {
-    return await db.select().from(categories).orderBy(asc(categories.name));
+    const categories = await CategoryModel.find({ userId }).sort({ createdAt: -1 });
+    return categories.map(cat => ({
+      id: cat._id.toString(),
+      name: cat.name,
+      color: cat.color,
+      userId: cat.userId,
+      createdAt: cat.createdAt,
+    }));
   }
 
   async createCategory(category: InsertCategory): Promise<Category> {
-    const [newCategory] = await db.insert(categories).values(category).returning();
-    return newCategory;
+    const newCategory = new CategoryModel({
+      _id: nanoid(),
+      ...category,
+    });
+    const saved = await newCategory.save();
+    
+    return {
+      id: saved._id,
+      name: saved.name,
+      color: saved.color,
+      userId: saved.userId,
+      createdAt: saved.createdAt,
+    };
   }
 
-  async updateCategory(id: number, category: Partial<InsertCategory>): Promise<Category> {
-    const [updatedCategory] = await db
-      .update(categories)
-      .set(category)
-      .where(eq(categories.id, id))
-      .returning();
-    return updatedCategory;
+  async updateCategory(id: string, category: Partial<InsertCategory>): Promise<Category> {
+    const updated = await CategoryModel.findByIdAndUpdate(id, category, { new: true });
+    if (!updated) throw new Error('Category not found');
+    
+    return {
+      id: updated._id,
+      name: updated.name,
+      color: updated.color,
+      userId: updated.userId,
+      createdAt: updated.createdAt,
+    };
   }
 
-  async deleteCategory(id: number): Promise<void> {
-    await db.delete(categories).where(eq(categories.id, id));
+  async deleteCategory(id: string): Promise<void> {
+    await CategoryModel.findByIdAndDelete(id);
   }
 
   // Product operations
   async getProducts(userId: string): Promise<ProductWithCategory[]> {
-    return await db
-      .select({
-        id: products.id,
-        name: products.name,
-        barcode: products.barcode,
-        price: products.price,
-        cost: products.cost,
-        stock: products.stock,
-        minStock: products.minStock,
-        categoryId: products.categoryId,
-        imageUrl: products.imageUrl,
-        description: products.description,
-        isActive: products.isActive,
-        userId: products.userId,
-        createdAt: products.createdAt,
-        updatedAt: products.updatedAt,
-        category: categories,
-      })
-      .from(products)
-      .leftJoin(categories, eq(products.categoryId, categories.id))
-      .where(and(eq(products.userId, userId), eq(products.isActive, true)))
-      .orderBy(desc(products.createdAt));
+    const products = await ProductModel.find({ userId }).sort({ createdAt: -1 });
+    const result: ProductWithCategory[] = [];
+    
+    for (const product of products) {
+      let category = undefined;
+      if (product.categoryId) {
+        const cat = await CategoryModel.findById(product.categoryId);
+        if (cat) {
+          category = {
+            id: cat._id.toString(),
+            name: cat.name,
+            color: cat.color,
+            userId: cat.userId,
+            createdAt: cat.createdAt,
+          };
+        }
+      }
+      
+      result.push({
+        id: product._id.toString(),
+        name: product.name,
+        barcode: product.barcode,
+        price: product.price,
+        cost: product.cost,
+        stock: product.stock,
+        minStock: product.minStock,
+        categoryId: product.categoryId,
+        imageUrl: product.imageUrl,
+        description: product.description,
+        isActive: product.isActive,
+        userId: product.userId,
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt,
+        category,
+      });
+    }
+    
+    return result;
   }
 
-  async getProduct(id: number, userId: string): Promise<ProductWithCategory | undefined> {
-    const [product] = await db
-      .select({
-        id: products.id,
-        name: products.name,
-        barcode: products.barcode,
-        price: products.price,
-        cost: products.cost,
-        stock: products.stock,
-        minStock: products.minStock,
-        categoryId: products.categoryId,
-        imageUrl: products.imageUrl,
-        description: products.description,
-        isActive: products.isActive,
-        userId: products.userId,
-        createdAt: products.createdAt,
-        updatedAt: products.updatedAt,
-        category: categories,
-      })
-      .from(products)
-      .leftJoin(categories, eq(products.categoryId, categories.id))
-      .where(and(eq(products.id, id), eq(products.userId, userId)));
-    return product;
+  async getProduct(id: string, userId: string): Promise<ProductWithCategory | undefined> {
+    const product = await ProductModel.findOne({ _id: id, userId });
+    if (!product) return undefined;
+    
+    let category = undefined;
+    if (product.categoryId) {
+      const cat = await CategoryModel.findById(product.categoryId);
+      if (cat) {
+        category = {
+          id: cat._id.toString(),
+          name: cat.name,
+          color: cat.color,
+          userId: cat.userId,
+          createdAt: cat.createdAt,
+        };
+      }
+    }
+    
+    return {
+      id: product._id.toString(),
+      name: product.name,
+      barcode: product.barcode,
+      price: product.price,
+      cost: product.cost,
+      stock: product.stock,
+      minStock: product.minStock,
+      categoryId: product.categoryId,
+      imageUrl: product.imageUrl,
+      description: product.description,
+      isActive: product.isActive,
+      userId: product.userId,
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt,
+      category,
+    };
   }
 
   async getProductByBarcode(barcode: string, userId: string): Promise<ProductWithCategory | undefined> {
-    const [product] = await db
-      .select({
-        id: products.id,
-        name: products.name,
-        barcode: products.barcode,
-        price: products.price,
-        cost: products.cost,
-        stock: products.stock,
-        minStock: products.minStock,
-        categoryId: products.categoryId,
-        imageUrl: products.imageUrl,
-        description: products.description,
-        isActive: products.isActive,
-        userId: products.userId,
-        createdAt: products.createdAt,
-        updatedAt: products.updatedAt,
-        category: categories,
-      })
-      .from(products)
-      .leftJoin(categories, eq(products.categoryId, categories.id))
-      .where(and(eq(products.barcode, barcode), eq(products.userId, userId), eq(products.isActive, true)));
-    return product;
+    const product = await ProductModel.findOne({ barcode, userId });
+    if (!product) return undefined;
+    
+    let category = undefined;
+    if (product.categoryId) {
+      const cat = await CategoryModel.findById(product.categoryId);
+      if (cat) {
+        category = {
+          id: cat._id.toString(),
+          name: cat.name,
+          color: cat.color,
+          userId: cat.userId,
+          createdAt: cat.createdAt,
+        };
+      }
+    }
+    
+    return {
+      id: product._id.toString(),
+      name: product.name,
+      barcode: product.barcode,
+      price: product.price,
+      cost: product.cost,
+      stock: product.stock,
+      minStock: product.minStock,
+      categoryId: product.categoryId,
+      imageUrl: product.imageUrl,
+      description: product.description,
+      isActive: product.isActive,
+      userId: product.userId,
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt,
+      category,
+    };
   }
 
   async createProduct(product: InsertProduct): Promise<Product> {
-    const [newProduct] = await db.insert(products).values({
+    const newProduct = new ProductModel({
+      _id: nanoid(),
       ...product,
-      updatedAt: new Date(),
-    }).returning();
-    return newProduct;
+    });
+    const saved = await newProduct.save();
+    
+    return {
+      id: saved._id,
+      name: saved.name,
+      barcode: saved.barcode,
+      price: saved.price,
+      cost: saved.cost,
+      stock: saved.stock,
+      minStock: saved.minStock,
+      categoryId: saved.categoryId,
+      imageUrl: saved.imageUrl,
+      description: saved.description,
+      isActive: saved.isActive,
+      userId: saved.userId,
+      createdAt: saved.createdAt,
+      updatedAt: saved.updatedAt,
+    };
   }
 
-  async updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product> {
-    const [updatedProduct] = await db
-      .update(products)
-      .set({
-        ...product,
-        updatedAt: new Date(),
-      })
-      .where(eq(products.id, id))
-      .returning();
-    return updatedProduct;
+  async updateProduct(id: string, product: Partial<InsertProduct>): Promise<Product> {
+    const updated = await ProductModel.findByIdAndUpdate(id, product, { new: true });
+    if (!updated) throw new Error('Product not found');
+    
+    return {
+      id: updated._id,
+      name: updated.name,
+      barcode: updated.barcode,
+      price: updated.price,
+      cost: updated.cost,
+      stock: updated.stock,
+      minStock: updated.minStock,
+      categoryId: updated.categoryId,
+      imageUrl: updated.imageUrl,
+      description: updated.description,
+      isActive: updated.isActive,
+      userId: updated.userId,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+    };
   }
 
-  async deleteProduct(id: number): Promise<void> {
-    await db.update(products).set({ isActive: false }).where(eq(products.id, id));
+  async deleteProduct(id: string): Promise<void> {
+    await ProductModel.findByIdAndDelete(id);
   }
 
   async getLowStockProducts(userId: string): Promise<ProductWithCategory[]> {
-    return await db
-      .select({
-        id: products.id,
-        name: products.name,
-        barcode: products.barcode,
-        price: products.price,
-        cost: products.cost,
-        stock: products.stock,
-        minStock: products.minStock,
-        categoryId: products.categoryId,
-        imageUrl: products.imageUrl,
-        description: products.description,
-        isActive: products.isActive,
-        userId: products.userId,
-        createdAt: products.createdAt,
-        updatedAt: products.updatedAt,
-        category: categories,
-      })
-      .from(products)
-      .leftJoin(categories, eq(products.categoryId, categories.id))
-      .where(
-        and(
-          eq(products.userId, userId),
-          eq(products.isActive, true),
-          sql`${products.stock} <= ${products.minStock}`
-        )
-      )
-      .orderBy(asc(products.stock));
+    const products = await ProductModel.find({
+      userId,
+      $expr: { $lte: ["$stock", "$minStock"] }
+    });
+    
+    const result: ProductWithCategory[] = [];
+    for (const product of products) {
+      let category = undefined;
+      if (product.categoryId) {
+        const cat = await CategoryModel.findById(product.categoryId);
+        if (cat) {
+          category = {
+            id: cat._id.toString(),
+            name: cat.name,
+            color: cat.color,
+            userId: cat.userId,
+            createdAt: cat.createdAt,
+          };
+        }
+      }
+      
+      result.push({
+        id: product._id.toString(),
+        name: product.name,
+        barcode: product.barcode,
+        price: product.price,
+        cost: product.cost,
+        stock: product.stock,
+        minStock: product.minStock,
+        categoryId: product.categoryId,
+        imageUrl: product.imageUrl,
+        description: product.description,
+        isActive: product.isActive,
+        userId: product.userId,
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt,
+        category,
+      });
+    }
+    
+    return result;
   }
 
   async searchProducts(query: string, userId: string): Promise<ProductWithCategory[]> {
-    return await db
-      .select({
-        id: products.id,
-        name: products.name,
-        barcode: products.barcode,
-        price: products.price,
-        cost: products.cost,
-        stock: products.stock,
-        minStock: products.minStock,
-        categoryId: products.categoryId,
-        imageUrl: products.imageUrl,
-        description: products.description,
-        isActive: products.isActive,
-        userId: products.userId,
-        createdAt: products.createdAt,
-        updatedAt: products.updatedAt,
-        category: categories,
-      })
-      .from(products)
-      .leftJoin(categories, eq(products.categoryId, categories.id))
-      .where(
-        and(
-          eq(products.userId, userId),
-          eq(products.isActive, true),
-          sql`(${products.name} ILIKE ${'%' + query + '%'} OR ${products.barcode} ILIKE ${'%' + query + '%'} OR ${products.description} ILIKE ${'%' + query + '%'})`
-        )
-      )
-      .orderBy(desc(products.createdAt));
+    const products = await ProductModel.find({
+      userId,
+      $or: [
+        { name: { $regex: query, $options: 'i' } },
+        { barcode: { $regex: query, $options: 'i' } },
+        { description: { $regex: query, $options: 'i' } }
+      ]
+    });
+    
+    const result: ProductWithCategory[] = [];
+    for (const product of products) {
+      let category = undefined;
+      if (product.categoryId) {
+        const cat = await CategoryModel.findById(product.categoryId);
+        if (cat) {
+          category = {
+            id: cat._id.toString(),
+            name: cat.name,
+            color: cat.color,
+            userId: cat.userId,
+            createdAt: cat.createdAt,
+          };
+        }
+      }
+      
+      result.push({
+        id: product._id.toString(),
+        name: product.name,
+        barcode: product.barcode,
+        price: product.price,
+        cost: product.cost,
+        stock: product.stock,
+        minStock: product.minStock,
+        categoryId: product.categoryId,
+        imageUrl: product.imageUrl,
+        description: product.description,
+        isActive: product.isActive,
+        userId: product.userId,
+        createdAt: product.createdAt,
+        updatedAt: product.updatedAt,
+        category,
+      });
+    }
+    
+    return result;
   }
 
   // Sales operations
   async createSale(sale: InsertSale, items: InsertSaleItem[]): Promise<SaleWithItems> {
-    return await db.transaction(async (tx) => {
-      // Create the sale
-      const [newSale] = await tx.insert(sales).values(sale).returning();
-
-      // Create sale items and update stock
-      const createdItems: (SaleItem & { product: Product })[] = [];
+    const saleId = nanoid();
+    
+    // Create the sale
+    const newSale = new SaleModel({
+      _id: saleId,
+      ...sale,
+    });
+    const savedSale = await newSale.save();
+    
+    // Create sale items and update stock
+    const createdItems: (SaleItem & { product: Product })[] = [];
+    
+    for (const item of items) {
+      const saleItem = new SaleItemModel({
+        _id: nanoid(),
+        saleId,
+        ...item,
+      });
+      const savedItem = await saleItem.save();
       
-      for (const item of items) {
-        const [saleItem] = await tx
-          .insert(saleItems)
-          .values({ ...item, saleId: newSale.id })
-          .returning();
-
-        // Get product info
-        const [product] = await tx
-          .select()
-          .from(products)
-          .where(eq(products.id, item.productId));
-
-        // Update product stock
-        await tx
-          .update(products)
-          .set({ 
-            stock: sql`${products.stock} - ${item.quantity}`,
-            updatedAt: new Date()
-          })
-          .where(eq(products.id, item.productId));
-
+      // Get product details
+      const product = await ProductModel.findById(item.productId);
+      if (product) {
+        // Update stock
+        await ProductModel.findByIdAndUpdate(
+          item.productId,
+          { $inc: { stock: -item.quantity } }
+        );
+        
         // Record stock movement
-        await tx.insert(stockMovements).values({
+        const stockMovement = new StockMovementModel({
+          _id: nanoid(),
           productId: item.productId,
           type: 'sale',
           quantity: -item.quantity,
-          reason: `Sale #${newSale.receiptNumber}`,
-          referenceId: newSale.id,
+          reason: 'Sale transaction',
+          referenceId: saleId,
           userId: sale.userId,
         });
-
-        createdItems.push({ ...saleItem, product });
+        await stockMovement.save();
+        
+        createdItems.push({
+          id: savedItem._id,
+          saleId: savedItem.saleId,
+          productId: savedItem.productId,
+          quantity: savedItem.quantity,
+          unitPrice: savedItem.unitPrice,
+          totalPrice: savedItem.totalPrice,
+          product: {
+            id: product._id,
+            name: product.name,
+            barcode: product.barcode,
+            price: product.price,
+            cost: product.cost,
+            stock: product.stock,
+            minStock: product.minStock,
+            categoryId: product.categoryId,
+            imageUrl: product.imageUrl,
+            description: product.description,
+            isActive: product.isActive,
+            userId: product.userId,
+            createdAt: product.createdAt,
+            updatedAt: product.updatedAt,
+          }
+        });
       }
-
-      return { ...newSale, items: createdItems };
-    });
+    }
+    
+    return {
+      id: savedSale._id,
+      total: savedSale.total,
+      subtotal: savedSale.subtotal,
+      tax: savedSale.tax,
+      discount: savedSale.discount,
+      paymentMethod: savedSale.paymentMethod,
+      customerName: savedSale.customerName,
+      receiptNumber: savedSale.receiptNumber,
+      userId: savedSale.userId,
+      createdAt: savedSale.createdAt,
+      items: createdItems,
+    };
   }
 
   async getSales(userId: string, limit = 50): Promise<SaleWithItems[]> {
-    const salesData = await db
-      .select()
-      .from(sales)
-      .where(eq(sales.userId, userId))
-      .orderBy(desc(sales.createdAt))
+    const sales = await SaleModel.find({ userId })
+      .sort({ createdAt: -1 })
       .limit(limit);
-
-    const salesWithItems: SaleWithItems[] = [];
-
-    for (const sale of salesData) {
-      const items = await db
-        .select({
-          id: saleItems.id,
-          saleId: saleItems.saleId,
-          productId: saleItems.productId,
-          quantity: saleItems.quantity,
-          unitPrice: saleItems.unitPrice,
-          totalPrice: saleItems.totalPrice,
-          product: products,
-        })
-        .from(saleItems)
-        .innerJoin(products, eq(saleItems.productId, products.id))
-        .where(eq(saleItems.saleId, sale.id));
-
-      salesWithItems.push({ ...sale, items });
+    
+    const result: SaleWithItems[] = [];
+    
+    for (const sale of sales) {
+      const items = await SaleItemModel.find({ saleId: sale._id });
+      const itemsWithProducts: (SaleItem & { product: Product })[] = [];
+      
+      for (const item of items) {
+        const product = await ProductModel.findById(item.productId);
+        if (product) {
+          itemsWithProducts.push({
+            id: item._id,
+            saleId: item.saleId,
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            totalPrice: item.totalPrice,
+            product: {
+              id: product._id,
+              name: product.name,
+              barcode: product.barcode,
+              price: product.price,
+              cost: product.cost,
+              stock: product.stock,
+              minStock: product.minStock,
+              categoryId: product.categoryId,
+              imageUrl: product.imageUrl,
+              description: product.description,
+              isActive: product.isActive,
+              userId: product.userId,
+              createdAt: product.createdAt,
+              updatedAt: product.updatedAt,
+            }
+          });
+        }
+      }
+      
+      result.push({
+        id: sale._id,
+        total: sale.total,
+        subtotal: sale.subtotal,
+        tax: sale.tax,
+        discount: sale.discount,
+        paymentMethod: sale.paymentMethod,
+        customerName: sale.customerName,
+        receiptNumber: sale.receiptNumber,
+        userId: sale.userId,
+        createdAt: sale.createdAt,
+        items: itemsWithProducts,
+      });
     }
-
-    return salesWithItems;
+    
+    return result;
   }
 
-  async getSale(id: number, userId: string): Promise<SaleWithItems | undefined> {
-    const [sale] = await db
-      .select()
-      .from(sales)
-      .where(and(eq(sales.id, id), eq(sales.userId, userId)));
-
+  async getSale(id: string, userId: string): Promise<SaleWithItems | undefined> {
+    const sale = await SaleModel.findOne({ _id: id, userId });
     if (!sale) return undefined;
-
-    const items = await db
-      .select({
-        id: saleItems.id,
-        saleId: saleItems.saleId,
-        productId: saleItems.productId,
-        quantity: saleItems.quantity,
-        unitPrice: saleItems.unitPrice,
-        totalPrice: saleItems.totalPrice,
-        product: products,
-      })
-      .from(saleItems)
-      .innerJoin(products, eq(saleItems.productId, products.id))
-      .where(eq(saleItems.saleId, sale.id));
-
-    return { ...sale, items };
+    
+    const items = await SaleItemModel.find({ saleId: id });
+    const itemsWithProducts: (SaleItem & { product: Product })[] = [];
+    
+    for (const item of items) {
+      const product = await ProductModel.findById(item.productId);
+      if (product) {
+        itemsWithProducts.push({
+          id: item._id,
+          saleId: item.saleId,
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+          totalPrice: item.totalPrice,
+          product: {
+            id: product._id,
+            name: product.name,
+            barcode: product.barcode,
+            price: product.price,
+            cost: product.cost,
+            stock: product.stock,
+            minStock: product.minStock,
+            categoryId: product.categoryId,
+            imageUrl: product.imageUrl,
+            description: product.description,
+            isActive: product.isActive,
+            userId: product.userId,
+            createdAt: product.createdAt,
+            updatedAt: product.updatedAt,
+          }
+        });
+      }
+    }
+    
+    return {
+      id: sale._id,
+      total: sale.total,
+      subtotal: sale.subtotal,
+      tax: sale.tax,
+      discount: sale.discount,
+      paymentMethod: sale.paymentMethod,
+      customerName: sale.customerName,
+      receiptNumber: sale.receiptNumber,
+      userId: sale.userId,
+      createdAt: sale.createdAt,
+      items: itemsWithProducts,
+    };
   }
 
   async getDailySales(userId: string, date: Date): Promise<{ total: string; count: number }> {
@@ -390,24 +620,17 @@ export class DatabaseStorage implements IStorage {
     startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(date);
     endOfDay.setHours(23, 59, 59, 999);
-
-    const [result] = await db
-      .select({
-        total: sum(sales.total),
-        count: count(sales.id),
-      })
-      .from(sales)
-      .where(
-        and(
-          eq(sales.userId, userId),
-          gte(sales.createdAt, startOfDay),
-          lte(sales.createdAt, endOfDay)
-        )
-      );
-
+    
+    const sales = await SaleModel.find({
+      userId,
+      createdAt: { $gte: startOfDay, $lte: endOfDay }
+    });
+    
+    const total = sales.reduce((sum, sale) => sum + sale.total, 0);
+    
     return {
-      total: result.total || "0.00",
-      count: result.count || 0,
+      total: total.toFixed(2),
+      count: sales.length,
     };
   }
 
@@ -416,82 +639,78 @@ export class DatabaseStorage implements IStorage {
     totalTransactions: number;
     topProducts: Array<{ name: string; quantity: number; revenue: string }>;
   }> {
-    // Get total sales and transactions
-    const [salesSummary] = await db
-      .select({
-        totalSales: sum(sales.total),
-        totalTransactions: count(sales.id),
-      })
-      .from(sales)
-      .where(
-        and(
-          eq(sales.userId, userId),
-          gte(sales.createdAt, startDate),
-          lte(sales.createdAt, endDate)
-        )
-      );
-
+    const sales = await SaleModel.find({
+      userId,
+      createdAt: { $gte: startDate, $lte: endDate }
+    });
+    
+    const totalSales = sales.reduce((sum, sale) => sum + sale.total, 0);
+    const totalTransactions = sales.length;
+    
     // Get top products
-    const topProducts = await db
-      .select({
-        name: products.name,
-        quantity: sum(saleItems.quantity),
-        revenue: sum(saleItems.totalPrice),
-      })
-      .from(saleItems)
-      .innerJoin(sales, eq(saleItems.saleId, sales.id))
-      .innerJoin(products, eq(saleItems.productId, products.id))
-      .where(
-        and(
-          eq(sales.userId, userId),
-          gte(sales.createdAt, startDate),
-          lte(sales.createdAt, endDate)
-        )
-      )
-      .groupBy(products.id, products.name)
-      .orderBy(desc(sum(saleItems.quantity)))
-      .limit(10);
-
-    return {
-      totalSales: salesSummary.totalSales || "0.00",
-      totalTransactions: salesSummary.totalTransactions || 0,
-      topProducts: topProducts.map((p) => ({
+    const productSales = new Map<string, { name: string; quantity: number; revenue: number }>();
+    
+    for (const sale of sales) {
+      const items = await SaleItemModel.find({ saleId: sale._id });
+      for (const item of items) {
+        const product = await ProductModel.findById(item.productId);
+        if (product) {
+          const existing = productSales.get(item.productId) || { name: product.name, quantity: 0, revenue: 0 };
+          existing.quantity += item.quantity;
+          existing.revenue += item.totalPrice;
+          productSales.set(item.productId, existing);
+        }
+      }
+    }
+    
+    const topProducts = Array.from(productSales.values())
+      .sort((a, b) => b.revenue - a.revenue)
+      .slice(0, 10)
+      .map(p => ({
         name: p.name,
-        quantity: Number(p.quantity) || 0,
-        revenue: String(p.revenue) || "0.00",
-      })),
+        quantity: p.quantity,
+        revenue: p.revenue.toFixed(2),
+      }));
+    
+    return {
+      totalSales: totalSales.toFixed(2),
+      totalTransactions,
+      topProducts,
     };
   }
 
   // Stock operations
-  async updateStock(productId: number, quantity: number, type: string, reason?: string, userId?: string): Promise<void> {
-    await db.transaction(async (tx) => {
-      await tx
-        .update(products)
-        .set({ 
-          stock: sql`${products.stock} + ${quantity}`,
-          updatedAt: new Date()
-        })
-        .where(eq(products.id, productId));
-
-      if (userId) {
-        await tx.insert(stockMovements).values({
-          productId,
-          type,
-          quantity,
-          reason: reason || type,
-          userId,
-        });
-      }
-    });
+  async updateStock(productId: string, quantity: number, type: string, reason?: string, userId?: string): Promise<void> {
+    await ProductModel.findByIdAndUpdate(
+      productId,
+      { $inc: { stock: quantity } }
+    );
+    
+    if (userId) {
+      const stockMovement = new StockMovementModel({
+        _id: nanoid(),
+        productId,
+        type,
+        quantity,
+        reason,
+        userId,
+      });
+      await stockMovement.save();
+    }
   }
 
-  async getStockMovements(productId: number): Promise<StockMovement[]> {
-    return await db
-      .select()
-      .from(stockMovements)
-      .where(eq(stockMovements.productId, productId))
-      .orderBy(desc(stockMovements.createdAt));
+  async getStockMovements(productId: string): Promise<StockMovement[]> {
+    const movements = await StockMovementModel.find({ productId }).sort({ createdAt: -1 });
+    return movements.map(movement => ({
+      id: movement._id,
+      productId: movement.productId,
+      type: movement.type,
+      quantity: movement.quantity,
+      reason: movement.reason,
+      referenceId: movement.referenceId,
+      userId: movement.userId,
+      createdAt: movement.createdAt,
+    }));
   }
 
   // Dashboard operations
@@ -503,19 +722,17 @@ export class DatabaseStorage implements IStorage {
   }> {
     const today = new Date();
     const dailySales = await this.getDailySales(userId, today);
-
-    const [productStats] = await db
-      .select({
-        totalProducts: count(products.id),
-        lowStockCount: count(sql`CASE WHEN ${products.stock} <= ${products.minStock} THEN 1 END`),
-      })
-      .from(products)
-      .where(and(eq(products.userId, userId), eq(products.isActive, true)));
-
+    
+    const totalProducts = await ProductModel.countDocuments({ userId });
+    const lowStockCount = await ProductModel.countDocuments({
+      userId,
+      $expr: { $lte: ["$stock", "$minStock"] }
+    });
+    
     return {
       dailySales: dailySales.total,
-      totalProducts: productStats.totalProducts || 0,
-      lowStockCount: productStats.lowStockCount || 0,
+      totalProducts,
+      lowStockCount,
       transactionCount: dailySales.count,
     };
   }
@@ -527,20 +744,6 @@ export class DatabaseStorage implements IStorage {
     time: Date;
     icon: string;
   }>> {
-    const recentSales = await db
-      .select()
-      .from(sales)
-      .where(eq(sales.userId, userId))
-      .orderBy(desc(sales.createdAt))
-      .limit(limit);
-
-    const recentProducts = await db
-      .select()
-      .from(products)
-      .where(eq(products.userId, userId))
-      .orderBy(desc(products.createdAt))
-      .limit(5);
-
     const activities: Array<{
       type: string;
       description: string;
@@ -548,29 +751,41 @@ export class DatabaseStorage implements IStorage {
       time: Date;
       icon: string;
     }> = [];
-
-    // Add sales
-    recentSales.forEach((sale) => {
+    
+    // Get recent sales
+    const recentSales = await SaleModel.find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(limit);
+    
+    for (const sale of recentSales) {
       activities.push({
         type: 'sale',
         description: `Sale #${sale.receiptNumber}`,
-        amount: `+$${sale.total}`,
-        time: sale.createdAt!,
-        icon: 'shopping-cart',
+        amount: `$${sale.total.toFixed(2)}`,
+        time: sale.createdAt,
+        icon: 'ShoppingCart',
       });
-    });
-
-    // Add new products
-    recentProducts.forEach((product) => {
-      activities.push({
-        type: 'product_added',
-        description: `Product Added: ${product.name}`,
-        time: product.createdAt!,
-        icon: 'package-plus',
-      });
-    });
-
-    // Sort by time and limit
+    }
+    
+    // Get recent stock movements
+    const recentMovements = await StockMovementModel.find({ userId })
+      .sort({ createdAt: -1 })
+      .limit(limit);
+    
+    for (const movement of recentMovements) {
+      if (movement.type !== 'sale') {
+        const product = await ProductModel.findById(movement.productId);
+        if (product) {
+          activities.push({
+            type: 'stock',
+            description: `Stock ${movement.type}: ${product.name}`,
+            time: movement.createdAt,
+            icon: movement.quantity > 0 ? 'Plus' : 'Minus',
+          });
+        }
+      }
+    }
+    
     return activities
       .sort((a, b) => b.time.getTime() - a.time.getTime())
       .slice(0, limit);

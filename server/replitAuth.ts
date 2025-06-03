@@ -5,7 +5,7 @@ import passport from "passport";
 import session from "express-session";
 import type { Express, RequestHandler } from "express";
 import memoize from "memoizee";
-import connectPg from "connect-pg-simple";
+import MongoStore from "connect-mongo";
 import { storage } from "./storage";
 
 if (!process.env.REPLIT_DOMAINS) {
@@ -24,16 +24,14 @@ const getOidcConfig = memoize(
 
 export function getSession() {
   const sessionTtl = 7 * 24 * 60 * 60 * 1000; // 1 week
-  const pgStore = connectPg(session);
-  const sessionStore = new pgStore({
-    conString: process.env.DATABASE_URL,
-    createTableIfMissing: false,
-    ttl: sessionTtl,
-    tableName: "sessions",
-  });
+  const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/inventory_pos';
+  
   return session({
     secret: process.env.SESSION_SECRET!,
-    store: sessionStore,
+    store: MongoStore.create({
+      mongoUrl: mongoUri,
+      touchAfter: 24 * 3600, // lazy session update
+    }),
     resave: false,
     saveUninitialized: false,
     cookie: {
